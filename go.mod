@@ -1,12 +1,10 @@
 module github.com/jenkins-x-plugins/jx-promote
 
 require (
-	github.com/Azure/go-autorest/autorest/azure/auth v0.4.2 // indirect
 	github.com/blang/semver v3.5.1+incompatible
 	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/cpuguy83/go-md2man v1.0.10
-	github.com/hashicorp/go-retryablehttp v0.6.6 // indirect
-	github.com/hashicorp/vault/api v1.0.5-0.20190909201928-35325e2c3262 // indirect
+	github.com/jenkins-x-plugins/jx-application v0.0.37
 	github.com/jenkins-x-plugins/jx-gitops v0.3.13
 	github.com/jenkins-x/go-scm v1.10.10
 	github.com/jenkins-x/jx-api/v4 v4.1.5
@@ -14,7 +12,6 @@ require (
 	github.com/jenkins-x/jx-logging/v3 v3.0.6
 	github.com/pkg/errors v0.9.1
 	github.com/roboll/helmfile v0.139.0
-	github.com/smartystreets/assertions v1.0.0 // indirect
 	github.com/spf13/cobra v1.2.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.7.0
