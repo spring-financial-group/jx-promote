@@ -104,6 +104,9 @@ func (o *Options) Run() error {
 		return nil
 	}
 	apps := o.GetEnvApplications(list, o.FromEnvironment)
+	if len(apps) == 0 {
+		return errors.New("No applications in given environment")
+	}
 	chosenApps, err := o.Input.SelectNames(apps, "Choose applications to promote", false, "please select an application")
 	if err != nil {
 		return errors.Wrapf(err, "failed to choose applications")
