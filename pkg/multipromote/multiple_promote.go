@@ -103,7 +103,7 @@ func (o *Options) Run() error {
 		log.Logger().Infof("No applications found")
 		return nil
 	}
-	apps := o.getEnvApplications(list, o.FromEnvironment)
+	apps := o.GetEnvApplications(list, o.FromEnvironment)
 	chosenApps, err := o.Input.SelectNames(apps, "Choose applications to promote", false, "please select an application")
 	if err != nil {
 		return errors.Wrapf(err, "failed to choose applications")
@@ -123,7 +123,7 @@ func (o *Options) Run() error {
 	return nil
 }
 
-func (o *Options) getEnvApplications(list applications.List, env string) []string {
+func (o *Options) GetEnvApplications(list applications.List, env string) []string {
 	apps := []string{}
 	for _, a := range list.Items {
 		if val, ok := a.Environments[env]; ok {
