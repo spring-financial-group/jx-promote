@@ -916,7 +916,6 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 
 	logMergeFailure := false
 	logNoMergeCommitSha := false
-	logHasMergeSha := false
 
 	ctx := context.Background()
 
@@ -929,34 +928,23 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 		}
 
 		if pr.Merged {
-
-			if pr.MergeSha == "" {
-				if !logNoMergeCommitSha {
-					logNoMergeCommitSha = true
-					log.Logger().Infof("Pull Request %s is merged but waiting for Merge SHA", termcolor.ColorInfo(pr.Link))
-				}
-			} else {
-				mergeSha := pr.MergeSha
-				if !logHasMergeSha {
-					log.Logger().Infof("Pull Request %s is merged at sha %s", termcolor.ColorInfo(pr.Link), termcolor.ColorInfo(mergeSha))
-
-					mergedPR := func(a *v1.PipelineActivity, s *v1.PipelineActivityStep, ps *v1.PromoteActivityStep, p *v1.PromotePullRequestStep) error {
-						err = activities.CompletePromotionPullRequest(a, s, ps, p)
-						if err != nil {
-							return err
-						}
-						p.MergeCommitSHA = mergeSha
-						return nil
-					}
-					err = promoteKey.OnPromotePullRequest(o.KubeClient, o.JXClient, o.Namespace, mergedPR)
+			if pr.MergeSha != "" {
+				log.Logger().Infof("Pull Request %s is merged at sha %s", termcolor.ColorInfo(pr.Link), termcolor.ColorInfo(pr.MergeSha))
+				mergedPR := func(a *v1.PipelineActivity, s *v1.PipelineActivityStep, ps *v1.PromoteActivityStep, p *v1.PromotePullRequestStep) error {
+					err = activities.CompletePromotionPullRequest(a, s, ps, p)
 					if err != nil {
 						return err
 					}
-
-					if o.NoWaitAfterMerge {
-						log.Logger().Infof("Pull requests are merged, No wait on promotion to complete")
-						return err
-					}
+					p.MergeCommitSHA = pr.MergeSha
+					return nil
+				}
+				err = promoteKey.OnPromotePullRequest(o.KubeClient, o.JXClient, o.Namespace, mergedPR)
+				if err != nil {
+					return err
+				}
+				if o.NoWaitAfterMerge {
+					log.Logger().Infof("Pull requests are merged, No wait on promotion to complete")
+					return err
 				}
 
 				err = promoteKey.OnPromoteUpdate(o.KubeClient, o.JXClient, o.Namespace, activities.StartPromotionUpdate)
@@ -969,6 +957,11 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 					err = promoteKey.OnPromoteUpdate(o.KubeClient, o.JXClient, o.Namespace, activities.CompletePromotionUpdate)
 				}
 				return err
+			}
+
+			if !logNoMergeCommitSha {
+				logNoMergeCommitSha = true
+				log.Logger().Infof("Pull Request %s is merged but waiting for Merge SHA", termcolor.ColorInfo(pr.Link))
 			}
 
 		} else {
