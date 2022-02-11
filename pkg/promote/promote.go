@@ -911,27 +911,17 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 	logNoMergeCommitSha := false
 	logHasMergeSha := false
 
-	jxClient := o.JXClient
-	if jxClient == nil {
-		return errors.Errorf("no jx client")
-	}
-	kubeClient := o.KubeClient
-	if kubeClient == nil {
-		return errors.Errorf("no kube client")
-	}
-
-	scmClient := o.ScmClient
-	if scmClient == nil {
-		return errors.Errorf("no ScmClient")
-	}
-
 	ctx := context.Background()
+
+	if err := o.validateClients(); err != nil {
+		return err
+	}
 
 	if pullRequestInfo != nil {
 		fullName := pullRequestInfo.Repository().FullName
 		prNumber := pullRequestInfo.Number
 		for {
-			pr, _, err := scmClient.PullRequests.Find(ctx, fullName, prNumber)
+			pr, _, err := o.ScmClient.PullRequests.Find(ctx, fullName, prNumber)
 			if err != nil {
 				return errors.Wrapf(err, "failed to find PR %s %d", fullName, prNumber)
 			}
@@ -957,7 +947,7 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 								p.MergeCommitSHA = mergeSha
 								return nil
 							}
-							err = promoteKey.OnPromotePullRequest(kubeClient, jxClient, o.Namespace, mergedPR)
+							err = promoteKey.OnPromotePullRequest(o.KubeClient, o.JXClient, o.Namespace, mergedPR)
 							if err != nil {
 								return err
 							}
@@ -968,14 +958,14 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 							}
 						}
 
-						err = promoteKey.OnPromoteUpdate(kubeClient, jxClient, o.Namespace, activities.StartPromotionUpdate)
+						err = promoteKey.OnPromoteUpdate(o.KubeClient, o.JXClient, o.Namespace, activities.StartPromotionUpdate)
 						if err != nil {
 							return err
 						}
 
 						err = o.CommentOnIssues(ns, env, promoteKey)
 						if err == nil {
-							err = promoteKey.OnPromoteUpdate(kubeClient, jxClient, o.Namespace, activities.CompletePromotionUpdate)
+							err = promoteKey.OnPromoteUpdate(o.KubeClient, o.JXClient, o.Namespace, activities.CompletePromotionUpdate)
 						}
 						return err
 					}
@@ -999,7 +989,7 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 							if !(o.NoMergePullRequest) {
 								tideMerge := false
 								// Now check if tide is running or not
-								commitStatues, _, err := scmClient.Repositories.ListStatus(ctx, fullName, prLastCommitSha, scm.ListOptions{})
+								commitStatues, _, err := o.ScmClient.Repositories.ListStatus(ctx, fullName, prLastCommitSha, scm.ListOptions{})
 								if err != nil {
 									log.Logger().Warnf("unable to get commit statuses for %s", pr.Link)
 								} else {
@@ -1014,7 +1004,7 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 									prMergeOptions := &scm.PullRequestMergeOptions{
 										CommitTitle: "jx promote automatically merged promotion PR",
 									}
-									_, err = scmClient.PullRequests.Merge(ctx, fullName, prNumber, prMergeOptions)
+									_, err = o.ScmClient.PullRequests.Merge(ctx, fullName, prNumber, prMergeOptions)
 									// TODO
 									// err = gitProvider.MergePullRequest(pr, "jx promote automatically merged promotion PR")
 									if err != nil {
@@ -1046,6 +1036,19 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 			}
 			time.Sleep(*o.PullRequestPollDuration)
 		}
+	}
+	return nil
+}
+
+func (o *Options) validateClients() error {
+	if o.JXClient == nil {
+		return errors.Errorf("no jx client")
+	}
+	if o.KubeClient == nil {
+		return errors.Errorf("no kube client")
+	}
+	if o.ScmClient == nil {
+		return errors.Errorf("no ScmClient")
 	}
 	return nil
 }
