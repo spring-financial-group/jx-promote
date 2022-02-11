@@ -914,13 +914,9 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 		return err
 	}
 
-	logMergeFailure := false
-	logNoMergeCommitSha := false
-
-	ctx := context.Background()
-
+	var logMergeFailure, logNoMergeCommitSha bool
 	repo := prInfo.Repository()
-
+	ctx := context.Background()
 	for {
 		pr, _, err := o.ScmClient.PullRequests.Find(ctx, repo.FullName, prInfo.Number)
 		if err != nil {
@@ -930,33 +926,7 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 		if pr.Merged {
 			if pr.MergeSha != "" {
 				log.Logger().Infof("Pull Request %s is merged at sha %s", termcolor.ColorInfo(pr.Link), termcolor.ColorInfo(pr.MergeSha))
-				mergedPR := func(a *v1.PipelineActivity, s *v1.PipelineActivityStep, ps *v1.PromoteActivityStep, p *v1.PromotePullRequestStep) error {
-					err = activities.CompletePromotionPullRequest(a, s, ps, p)
-					if err != nil {
-						return err
-					}
-					p.MergeCommitSHA = pr.MergeSha
-					return nil
-				}
-				err = promoteKey.OnPromotePullRequest(o.KubeClient, o.JXClient, o.Namespace, mergedPR)
-				if err != nil {
-					return err
-				}
-				if o.NoWaitAfterMerge {
-					log.Logger().Infof("Pull requests are merged, No wait on promotion to complete")
-					return err
-				}
-
-				err = promoteKey.OnPromoteUpdate(o.KubeClient, o.JXClient, o.Namespace, activities.StartPromotionUpdate)
-				if err != nil {
-					return err
-				}
-
-				err = o.CommentOnIssues(ns, env, promoteKey)
-				if err == nil {
-					err = promoteKey.OnPromoteUpdate(o.KubeClient, o.JXClient, o.Namespace, activities.CompletePromotionUpdate)
-				}
-				return err
+				return o.completePromotionOnPullRequest(ns, env, pr, promoteKey)
 			}
 
 			if !logNoMergeCommitSha {
@@ -965,6 +935,7 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 			}
 
 		} else {
+
 			if pr.Closed {
 				log.Logger().Warnf("Pull Request %s is closed", termcolor.ColorInfo(pr.Link))
 				return fmt.Errorf("promotion failed as Pull Request %s is closed without merging", pr.Link)
@@ -974,6 +945,7 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 
 			status, err := o.PullRequestLastCommitStatus(pr)
 			if err != nil || status == nil {
+				// If err & no status log
 				log.Logger().Warnf("Failed to query the Pull Request last commit status for %s ref %s %s", pr.Link, prLastCommitSha, err)
 				// return fmt.Errorf("Failed to query the Pull Request last commit status for %s ref %s %s", pr.Link, prLastCommitSha, err)
 				// } else if status.State == "in-progress" {
@@ -981,7 +953,8 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 				log.Logger().Info("The build for the Pull Request last commit is currently in progress.")
 			} else {
 				if status.State == scm.StateSuccess {
-					if !(o.NoMergePullRequest) {
+
+					if !o.NoMergePullRequest { // Is automatic merge of promote Pull Requests disabled? (default disabled = false)
 						tideMerge := false
 						// Now check if tide is running or not
 						commitStatues, _, err := o.ScmClient.Repositories.ListStatus(ctx, repo.FullName, prLastCommitSha, scm.ListOptions{})
@@ -1045,6 +1018,37 @@ func (o *Options) validateClients() error {
 		return errors.Errorf("no ScmClient")
 	}
 	return nil
+}
+
+func (o *Options) completePromotionOnPullRequest(ns string, env *jxcore.EnvironmentConfig, pr *scm.PullRequest, promoteKey *activities.PromoteStepActivityKey) error {
+	mergedPR := func(a *v1.PipelineActivity, s *v1.PipelineActivityStep, ps *v1.PromoteActivityStep, p *v1.PromotePullRequestStep) error {
+		err := activities.CompletePromotionPullRequest(a, s, ps, p)
+		if err != nil {
+			return err
+		}
+		p.MergeCommitSHA = pr.MergeSha
+		return nil
+	}
+	err := promoteKey.OnPromotePullRequest(o.KubeClient, o.JXClient, o.Namespace, mergedPR)
+	if err != nil {
+		return err
+	}
+
+	if o.NoWaitAfterMerge {
+		log.Logger().Infof("Pull requests are merged, No wait on promotion to complete")
+		return err
+	}
+
+	err = promoteKey.OnPromoteUpdate(o.KubeClient, o.JXClient, o.Namespace, activities.StartPromotionUpdate)
+	if err != nil {
+		return err
+	}
+
+	err = o.CommentOnIssues(ns, env, promoteKey)
+	if err == nil {
+		err = promoteKey.OnPromoteUpdate(o.KubeClient, o.JXClient, o.Namespace, activities.CompletePromotionUpdate)
+	}
+	return err
 }
 
 func StateIsErrorOrFailure(status *scm.Status) bool {
