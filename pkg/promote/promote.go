@@ -924,25 +924,30 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 		}
 
 		if pr.Merged {
+			// PR is merged but no Merge SHA
 			if pr.MergeSha != "" {
 				log.Logger().Infof("Pull Request %s is merged at sha %s", termcolor.ColorInfo(pr.Link), termcolor.ColorInfo(pr.MergeSha))
-				return o.completePromotionOnPullRequest(ns, env, pr, promoteKey)
+				return o.completePromotion(ns, env, pr, promoteKey)
 			}
 
+			// Log that waiting for merge SHA and set bool
 			if !logNoMergeCommitSha {
 				logNoMergeCommitSha = true
 				log.Logger().Infof("Pull Request %s is merged but waiting for Merge SHA", termcolor.ColorInfo(pr.Link))
 			}
 
-		} else {
+		} else { // If PR isn't merged
 
+			// If PR is closed return error
 			if pr.Closed {
 				log.Logger().Warnf("Pull Request %s is closed", termcolor.ColorInfo(pr.Link))
 				return fmt.Errorf("promotion failed as Pull Request %s is closed without merging", pr.Link)
 			}
 
+			// returns the SHA of the last commit
 			prLastCommitSha := o.pullRequestLastCommitSha(pr)
 
+			// returns status for the last commit
 			status, err := o.PullRequestLastCommitStatus(pr)
 			if err != nil || status == nil {
 				// If err & no status log
@@ -951,38 +956,9 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 				// } else if status.State == "in-progress" {
 			} else if StateIsPending(status) {
 				log.Logger().Info("The build for the Pull Request last commit is currently in progress.")
-			} else {
+			} else { // If status is complete
 				if status.State == scm.StateSuccess {
-
-					if !o.NoMergePullRequest { // Is automatic merge of promote Pull Requests disabled? (default disabled = false)
-						tideMerge := false
-						// Now check if tide is running or not
-						commitStatues, _, err := o.ScmClient.Repositories.ListStatus(ctx, repo.FullName, prLastCommitSha, scm.ListOptions{})
-						if err != nil {
-							log.Logger().Warnf("unable to get commit statuses for %s", pr.Link)
-						} else {
-							for _, s := range commitStatues {
-								if s.Label == "tide" {
-									tideMerge = true
-									break
-								}
-							}
-						}
-						if !tideMerge {
-							prMergeOptions := &scm.PullRequestMergeOptions{
-								CommitTitle: "jx promote automatically merged promotion PR",
-							}
-							_, err = o.ScmClient.PullRequests.Merge(ctx, repo.FullName, prInfo.Number, prMergeOptions)
-							// TODO
-							// err = gitProvider.MergePullRequest(pr, "jx promote automatically merged promotion PR")
-							if err != nil {
-								if !logMergeFailure {
-									logMergeFailure = true
-									log.Logger().Warnf("Failed to merge the Pull Request %s due to %s maybe I don't have karma?", pr.Link, err)
-								}
-							}
-						}
-					}
+					o.checkMergePullRequest(ctx, repo, prLastCommitSha, pr, prInfo, logMergeFailure)
 				} else if StateIsErrorOrFailure(status) {
 					return fmt.Errorf("pull request %s last commit has status %s for ref %s", pr.Link, status.State.String(), prLastCommitSha)
 				} else {
@@ -990,7 +966,7 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 				}
 			}
 		}
-
+		// Rebase PR if there is a conflict
 		if !pr.Mergeable {
 			log.Logger().Info("Rebasing PullRequest due to conflict")
 
@@ -999,11 +975,45 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 				return err
 			}
 		}
-
+		// Check if timeout period has passed
 		if time.Now().After(end) {
 			return fmt.Errorf("timed out waiting for pull request %s to merge. Waited %s", pr.Link, duration.String())
 		}
+
 		time.Sleep(*o.PullRequestPollDuration)
+	}
+}
+
+func (o *Options) checkMergePullRequest(ctx context.Context, repo scm.Repository, prLastCommitSha string, pr *scm.PullRequest, prInfo *scm.PullRequest, logMergeFailure bool) {
+	if !o.NoMergePullRequest { // Is automatic merge of promote Pull Requests disabled? (default disabled = false)
+		tideMerge := false
+		// Now check if tide is running or not
+		commitStatues, _, err := o.ScmClient.Repositories.ListStatus(ctx, repo.FullName, prLastCommitSha, scm.ListOptions{})
+		if err != nil {
+			log.Logger().Warnf("unable to get commit statuses for %s", pr.Link)
+		} else {
+			for _, s := range commitStatues {
+				if s.Label == "tide" {
+					tideMerge = true
+					break
+				}
+			}
+		}
+		//
+		if !tideMerge {
+			prMergeOptions := &scm.PullRequestMergeOptions{
+				CommitTitle: "jx promote automatically merged promotion PR",
+			}
+			_, err = o.ScmClient.PullRequests.Merge(ctx, repo.FullName, prInfo.Number, prMergeOptions)
+			// TODO
+			// err = gitProvider.MergePullRequest(pr, "jx promote automatically merged promotion PR")
+			if err != nil {
+				if !logMergeFailure {
+					logMergeFailure = true
+					log.Logger().Warnf("Failed to merge the Pull Request %s due to %s maybe I don't have karma?", pr.Link, err)
+				}
+			}
+		}
 	}
 }
 
@@ -1020,7 +1030,7 @@ func (o *Options) validateClients() error {
 	return nil
 }
 
-func (o *Options) completePromotionOnPullRequest(ns string, env *jxcore.EnvironmentConfig, pr *scm.PullRequest, promoteKey *activities.PromoteStepActivityKey) error {
+func (o *Options) completePromotion(ns string, env *jxcore.EnvironmentConfig, pr *scm.PullRequest, promoteKey *activities.PromoteStepActivityKey) error {
 	mergedPR := func(a *v1.PipelineActivity, s *v1.PipelineActivityStep, ps *v1.PromoteActivityStep, p *v1.PromotePullRequestStep) error {
 		err := activities.CompletePromotionPullRequest(a, s, ps, p)
 		if err != nil {
