@@ -936,9 +936,7 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 				log.Logger().Infof("Pull Request %s is merged but waiting for Merge SHA", termcolor.ColorInfo(pr.Link))
 			}
 
-		} else { // If PR isn't merged
-
-			// If PR is closed return error
+		} else {
 			if pr.Closed {
 				log.Logger().Warnf("Pull Request %s is closed", termcolor.ColorInfo(pr.Link))
 				return fmt.Errorf("promotion failed as Pull Request %s is closed without merging", pr.Link)
@@ -948,22 +946,9 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 			prLastCommitSha := o.pullRequestLastCommitSha(pr)
 
 			// returns status for the last commit
-			status, err := o.PullRequestLastCommitStatus(pr)
-			if err != nil || status == nil {
-				// If err & no status log
-				log.Logger().Warnf("Failed to query the Pull Request last commit status for %s ref %s %s", pr.Link, prLastCommitSha, err)
-				// return fmt.Errorf("Failed to query the Pull Request last commit status for %s ref %s %s", pr.Link, prLastCommitSha, err)
-				// } else if status.State == "in-progress" {
-			} else if StateIsPending(status) {
-				log.Logger().Info("The build for the Pull Request last commit is currently in progress.")
-			} else { // If status is complete
-				if status.State == scm.StateSuccess {
-					o.checkMergePullRequest(ctx, repo, prLastCommitSha, pr, prInfo, logMergeFailure)
-				} else if StateIsErrorOrFailure(status) {
-					return fmt.Errorf("pull request %s last commit has status %s for ref %s", pr.Link, status.State.String(), prLastCommitSha)
-				} else {
-					log.Logger().Infof("got git provider status %s from PR %s", status.State.String(), pr.Link)
-				}
+			err = o.checkPullRequestStatus(pr, prLastCommitSha, ctx, repo, prInfo, logMergeFailure)
+			if err != nil {
+				return err
 			}
 		}
 		// Rebase PR if there is a conflict
@@ -982,6 +967,27 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 
 		time.Sleep(*o.PullRequestPollDuration)
 	}
+}
+
+func (o *Options) checkPullRequestStatus(pr *scm.PullRequest, prLastCommitSha string, ctx context.Context, repo scm.Repository, prInfo *scm.PullRequest, logMergeFailure bool) error {
+	status, err := o.PullRequestLastCommitStatus(pr)
+	if err != nil || status == nil {
+		// If err & no status log
+		log.Logger().Warnf("Failed to query the Pull Request last commit status for %s ref %s %s", pr.Link, prLastCommitSha, err)
+		// return fmt.Errorf("Failed to query the Pull Request last commit status for %s ref %s %s", pr.Link, prLastCommitSha, err)
+		// } else if status.State == "in-progress" {
+	} else if StateIsPending(status) {
+		log.Logger().Info("The build for the Pull Request last commit is currently in progress.")
+	} else { // If status is complete
+		if status.State == scm.StateSuccess {
+			o.checkMergePullRequest(ctx, repo, prLastCommitSha, pr, prInfo, logMergeFailure)
+		} else if StateIsErrorOrFailure(status) {
+			return fmt.Errorf("pull request %s last commit has status %s for ref %s", pr.Link, status.State.String(), prLastCommitSha)
+		} else {
+			log.Logger().Infof("got git provider status %s from PR %s", status.State.String(), pr.Link)
+		}
+	}
+	return nil
 }
 
 func (o *Options) checkMergePullRequest(ctx context.Context, repo scm.Repository, prLastCommitSha string, pr *scm.PullRequest, prInfo *scm.PullRequest, logMergeFailure bool) {
