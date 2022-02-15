@@ -915,38 +915,35 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 	}
 
 	var logMergeFailure, logNoMergeCommitSha bool
+	var prPageLink string
 	repo := prInfo.Repository()
 	ctx := context.Background()
-	for {
+
+	for time.Now().Before(end) {
 		pr, _, err := o.ScmClient.PullRequests.Find(ctx, repo.FullName, prInfo.Number)
 		if err != nil {
 			return errors.Wrapf(err, "failed to find PR %s %d", repo.FullName, prInfo.Number)
 		}
 
-		if pr.Merged {
-			// PR is merged but no Merge SHA
-			if pr.MergeSha != "" {
-				log.Logger().Infof("Pull Request %s is merged at sha %s", termcolor.ColorInfo(pr.Link), termcolor.ColorInfo(pr.MergeSha))
-				return o.completePromotion(ns, env, pr, promoteKey)
-			}
+		if prIsMergedWithSHA(pr) {
+			log.Logger().Infof("Pull Request %s is merged at sha %s", termcolor.ColorInfo(pr.Link), termcolor.ColorInfo(pr.MergeSha))
+			return o.completePromotion(ns, env, pr, promoteKey)
+		}
 
+		if pr.Merged {
 			// Log that waiting for merge SHA and set bool
 			if !logNoMergeCommitSha {
 				logNoMergeCommitSha = true
 				log.Logger().Infof("Pull Request %s is merged but waiting for Merge SHA", termcolor.ColorInfo(pr.Link))
 			}
-
 		} else {
 			if pr.Closed {
 				log.Logger().Warnf("Pull Request %s is closed", termcolor.ColorInfo(pr.Link))
 				return fmt.Errorf("promotion failed as Pull Request %s is closed without merging", pr.Link)
 			}
 
-			// returns the SHA of the last commit
-			prLastCommitSha := o.pullRequestLastCommitSha(pr)
-
 			// returns status for the last commit
-			err = o.checkPullRequestStatus(pr, prLastCommitSha, ctx, repo, prInfo, logMergeFailure)
+			err = o.checkPullRequestStatus(pr, o.pullRequestLastCommitSha(pr), ctx, repo, prInfo, logMergeFailure)
 			if err != nil {
 				return err
 			}
@@ -960,13 +957,19 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 				return err
 			}
 		}
-		// Check if timeout period has passed
-		if time.Now().After(end) {
-			return fmt.Errorf("timed out waiting for pull request %s to merge. Waited %s", pr.Link, duration.String())
-		}
 
+		prPageLink = pr.Link
 		time.Sleep(*o.PullRequestPollDuration)
 	}
+
+	return fmt.Errorf("timed out waiting for pull request %s to merge. Waited %s", prPageLink, duration.String())
+}
+
+func prIsMergedWithSHA(pr *scm.PullRequest) bool {
+	if pr.Merged && pr.MergeSha != "" {
+		return true
+	}
+	return false
 }
 
 func (o *Options) checkPullRequestStatus(pr *scm.PullRequest, prLastCommitSha string, ctx context.Context, repo scm.Repository, prInfo *scm.PullRequest, logMergeFailure bool) error {
