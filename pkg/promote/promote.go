@@ -943,7 +943,7 @@ func (o *Options) waitForGitOpsPullRequest(ns string, env *jxcore.EnvironmentCon
 			}
 
 			// returns status for the last commit
-			err = o.checkPullRequestStatus(pr, o.pullRequestLastCommitSha(pr), ctx, repo, prInfo, logMergeFailure)
+			err = o.checkPullRequestStatus(pr, ctx, repo, prInfo, logMergeFailure)
 			if err != nil {
 				return err
 			}
@@ -972,20 +972,20 @@ func prIsMergedWithSHA(pr *scm.PullRequest) bool {
 	return false
 }
 
-func (o *Options) checkPullRequestStatus(pr *scm.PullRequest, prLastCommitSha string, ctx context.Context, repo scm.Repository, prInfo *scm.PullRequest, logMergeFailure bool) error {
+func (o *Options) checkPullRequestStatus(pr *scm.PullRequest, ctx context.Context, repo scm.Repository, prInfo *scm.PullRequest, logMergeFailure bool) error {
 	status, err := o.PullRequestLastCommitStatus(pr)
 	if err != nil || status == nil {
 		// If err & no status log
-		log.Logger().Warnf("Failed to query the Pull Request last commit status for %s ref %s %s", pr.Link, prLastCommitSha, err)
+		log.Logger().Warnf("Failed to query the Pull Request last commit status for %s ref %s %s", pr.Link, o.pullRequestLastCommitSha(pr), err)
 		// return fmt.Errorf("Failed to query the Pull Request last commit status for %s ref %s %s", pr.Link, prLastCommitSha, err)
 		// } else if status.State == "in-progress" {
 	} else if StateIsPending(status) {
 		log.Logger().Info("The build for the Pull Request last commit is currently in progress.")
 	} else { // If status is complete
 		if status.State == scm.StateSuccess {
-			o.checkMergePullRequest(ctx, repo, prLastCommitSha, pr, prInfo, logMergeFailure)
+			o.checkMergePullRequest(ctx, repo, pr, prInfo, logMergeFailure)
 		} else if StateIsErrorOrFailure(status) {
-			return fmt.Errorf("pull request %s last commit has status %s for ref %s", pr.Link, status.State.String(), prLastCommitSha)
+			return fmt.Errorf("pull request %s last commit has status %s for ref %s", pr.Link, status.State.String(), o.pullRequestLastCommitSha(pr))
 		} else {
 			log.Logger().Infof("got git provider status %s from PR %s", status.State.String(), pr.Link)
 		}
@@ -993,11 +993,11 @@ func (o *Options) checkPullRequestStatus(pr *scm.PullRequest, prLastCommitSha st
 	return nil
 }
 
-func (o *Options) checkMergePullRequest(ctx context.Context, repo scm.Repository, prLastCommitSha string, pr *scm.PullRequest, prInfo *scm.PullRequest, logMergeFailure bool) {
+func (o *Options) checkMergePullRequest(ctx context.Context, repo scm.Repository, pr *scm.PullRequest, prInfo *scm.PullRequest, logMergeFailure bool) {
 	if !o.NoMergePullRequest { // Is automatic merge of promote Pull Requests disabled? (default disabled = false)
 		tideMerge := false
 		// Now check if tide is running or not
-		commitStatues, _, err := o.ScmClient.Repositories.ListStatus(ctx, repo.FullName, prLastCommitSha, scm.ListOptions{})
+		commitStatues, _, err := o.ScmClient.Repositories.ListStatus(ctx, repo.FullName, o.pullRequestLastCommitSha(pr), scm.ListOptions{})
 		if err != nil {
 			log.Logger().Warnf("unable to get commit statuses for %s", pr.Link)
 		} else {
