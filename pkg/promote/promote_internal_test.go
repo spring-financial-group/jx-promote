@@ -6,7 +6,10 @@ import (
 	"github.com/jenkins-x-plugins/jx-promote/pkg/environments"
 	"github.com/jenkins-x/go-scm/scm"
 	scmFake "github.com/jenkins-x/go-scm/scm/driver/fake"
+	jxcore "github.com/jenkins-x/jx-api/v4/pkg/apis/core/v4beta1"
 	jxFake "github.com/jenkins-x/jx-api/v4/pkg/client/clientset/versioned/fake"
+	"github.com/jenkins-x/jx-helpers/v3/pkg/gitclient/giturl"
+	"github.com/jenkins-x/jx-helpers/v3/pkg/kube/activities"
 	"github.com/jenkins-x/jx-logging/v3/pkg/log"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -249,12 +252,155 @@ func TestOptions_checkPullRequestStatus(t *testing.T) {
 			}()
 
 			err := testCase.testOptions.checkPullRequestStatus(testCase.args.pr, testCase.args.ctx, testCase.args.repo, testCase.args.prInfo, testCase.args.logMergeFailure)
+			assert.Equal(t, testCase.expectedLog, buf.String())
 			if testCase.expectedError == "" {
-				assert.Equal(t, testCase.expectedLog, buf.String())
 				assert.NoError(t, err)
 				return
 			}
-			assert.Equal(t, err.Error(), testCase.expectedError)
+			assert.Equal(t, testCase.expectedError, err.Error())
+		})
+	}
+}
+
+func TestOptions_completePromotion(t *testing.T) {
+	type arguments struct {
+		ns         string
+		env        *jxcore.EnvironmentConfig
+		pr         *scm.PullRequest
+		promoteKey *activities.PromoteStepActivityKey
+	}
+
+	testCases := []struct {
+		name          string
+		testOptions   Options
+		args          arguments
+		expectedError string
+		expectedLog   string
+	}{
+		{
+			name: "No Error returned",
+			testOptions: Options{
+				Namespace: "",
+				JXClient:  jxFake.NewSimpleClientset(),
+			},
+			args: arguments{
+				ns:  "TestNamespace",
+				env: &jxcore.EnvironmentConfig{},
+				pr:  &scm.PullRequest{MergeSha: "12345"},
+				promoteKey: &activities.PromoteStepActivityKey{
+					PipelineActivityKey: activities.PipelineActivityKey{
+						Name: "TestPipeline",
+					},
+				},
+			},
+			expectedError: "",
+			expectedLog:   "WARNING: No application name so cannot comment on issues that they are now in \n",
+		},
+		{
+			name: "No wait",
+			testOptions: Options{
+				Namespace:        "",
+				JXClient:         jxFake.NewSimpleClientset(),
+				NoWaitAfterMerge: true,
+			},
+			args: arguments{
+				ns:  "TestNamespace",
+				env: &jxcore.EnvironmentConfig{},
+				pr:  &scm.PullRequest{MergeSha: "12345"},
+				promoteKey: &activities.PromoteStepActivityKey{
+					PipelineActivityKey: activities.PipelineActivityKey{
+						Name: "TestPipeline",
+					},
+				},
+			},
+			expectedError: "",
+			expectedLog:   "Pull requests are merged, No wait on promotion to complete\n",
+		},
+		{
+			name: "OnPromoteUpdate error",
+			testOptions: Options{
+				Namespace: "",
+				JXClient:  jxFake.NewSimpleClientset(),
+			},
+			args: arguments{
+				ns:  "TestNamespace",
+				env: &jxcore.EnvironmentConfig{},
+				pr:  &scm.PullRequest{MergeSha: "12345"},
+				promoteKey: &activities.PromoteStepActivityKey{
+					PipelineActivityKey: activities.PipelineActivityKey{
+						Name: "TestPipeline",
+						PullRefs: map[string]string{
+							"test": "testRef",
+						},
+					},
+				},
+			},
+			expectedError: "there was a problem reconciling batch build data: error parsing the current build number for PipelineActivity testpipeline: strconv.Atoi: parsing \"\": invalid syntax",
+			expectedLog:   "Checking if batch build reconciling is needed\nNo past executions with the same lastCommitSha found - reconciliation not needed\nChecking if batch build reconciling is needed\n",
+		},
+		{
+			name: "CommentOnIssues error",
+			testOptions: Options{
+				Namespace:   "",
+				Application: "testApp",
+				Version:     "testVersion",
+				GitInfo:     &giturl.GitRepository{},
+				JXClient:    jxFake.NewSimpleClientset(),
+				KubeClient:  kubeFake.NewSimpleClientset(),
+			},
+			args: arguments{
+				ns: "TestNamespace",
+				env: &jxcore.EnvironmentConfig{
+					Key:       "testKey",
+					Namespace: "testNS",
+				},
+				pr: &scm.PullRequest{MergeSha: "12345"},
+				promoteKey: &activities.PromoteStepActivityKey{
+					PipelineActivityKey: activities.PipelineActivityKey{
+						Name: "TestPipeline",
+					},
+				},
+			},
+			expectedError: "ingresses.extensions \"\" not found",
+			expectedLog:   "WARNING: Could not find the service URL in namespace testNS for names testApp, , testNS-testApp\n",
+		},
+		//{
+		//	name: "OnPromotePullRequest error",
+		//	testOptions: Options{
+		//		Namespace: "",
+		//		JXClient:  jxFake.NewSimpleClientset(),
+		//	},
+		//	args: arguments{
+		//		ns:  "TestNamespace",
+		//		env: &jxcore.EnvironmentConfig{},
+		//		pr:  &scm.PullRequest{MergeSha: "12345"},
+		//		promoteKey: &activities.PromoteStepActivityKey{
+		//			PipelineActivityKey: activities.PipelineActivityKey{
+		//				Name: "TestPipeline",
+		//			},
+		//		},
+		//	},
+		//	expectedError: "",
+		//	expectedLog:   "WARNING: No application name so cannot comment on issues that they are now in \n",
+		//},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// Set logger to output to buffer to check logs
+			var buf bytes.Buffer
+			log.SetOutput(&buf)
+			defer func() {
+				log.SetOutput(os.Stderr)
+			}()
+
+			err := testCase.testOptions.completePromotion(testCase.args.ns, testCase.args.env, testCase.args.pr, testCase.args.promoteKey)
+			assert.Equal(t, testCase.expectedLog, buf.String())
+			if testCase.expectedError == "" {
+				assert.NoError(t, err)
+				return
+			}
+			assert.Equal(t, testCase.expectedError, err.Error())
 		})
 	}
 }
