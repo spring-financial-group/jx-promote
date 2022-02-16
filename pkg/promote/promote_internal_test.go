@@ -2,6 +2,7 @@ package promote
 
 import (
 	"github.com/jenkins-x-plugins/jx-promote/pkg/environments"
+	"github.com/jenkins-x/go-scm/scm"
 	scmFake "github.com/jenkins-x/go-scm/scm/driver/fake"
 	jxFake "github.com/jenkins-x/jx-api/v4/pkg/client/clientset/versioned/fake"
 	"github.com/pkg/errors"
@@ -10,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestOptions_ValidateClients(t *testing.T) {
+func TestOptions_validateClients(t *testing.T) {
 	scmFakeClient, _ := scmFake.NewDefault()
 
 	testCases := []struct {
@@ -72,6 +73,65 @@ func TestOptions_ValidateClients(t *testing.T) {
 				return
 			}
 			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestOptions_prIsMergedWithSHA(t *testing.T) {
+	type arguments struct {
+		pr *scm.PullRequest
+	}
+
+	testCases := []struct {
+		name         string
+		args         arguments
+		expectedBool bool
+	}{
+		{
+			name: "Merged with SHA",
+			args: arguments{
+				pr: &scm.PullRequest{
+					Merged:   true,
+					MergeSha: "12345",
+				},
+			},
+			expectedBool: true,
+		},
+		{
+			name: "Merged without SHA",
+			args: arguments{
+				pr: &scm.PullRequest{
+					Merged:   true,
+					MergeSha: "",
+				},
+			},
+			expectedBool: false,
+		},
+		{
+			name: "Not Merged with SHA",
+			args: arguments{
+				pr: &scm.PullRequest{
+					Merged:   false,
+					MergeSha: "12345",
+				},
+			},
+			expectedBool: false,
+		},
+		{
+			name: "Not Merged without SHA",
+			args: arguments{
+				pr: &scm.PullRequest{
+					Merged:   false,
+					MergeSha: "",
+				},
+			},
+			expectedBool: false,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			assert.Equal(t, testCase.expectedBool, prIsMergedWithSHA(testCase.args.pr))
 		})
 	}
 }
