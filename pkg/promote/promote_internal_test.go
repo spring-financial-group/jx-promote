@@ -404,3 +404,90 @@ func TestOptions_completePromotion(t *testing.T) {
 		})
 	}
 }
+
+func TestOptions_checkMergePullRequest(t *testing.T) {
+	type arguments struct {
+		ctx             context.Context
+		repo            scm.Repository
+		pr              *scm.PullRequest
+		prInfo          *scm.PullRequest
+		logMergeFailure bool
+	}
+
+	testCases := []struct {
+		name          string
+		testOptions   Options
+		args          arguments
+		isTideRunning bool
+		expectedLog   string
+	}{
+		//{
+		//	name:        "ListStatus log",
+		//	testOptions: Options{},
+		//	args: arguments{
+		//		ctx:             nil,
+		//		repo:            scm.Repository{FullName: "TestRepo"},
+		//		pr:              &scm.PullRequest{Head: scm.PullRequestBranch{Sha: "12345"}},
+		//		prInfo:          &scm.PullRequest{Number: 1},
+		//		logMergeFailure: false,
+		//	},
+		//	expectedLog: "",
+		//},
+		{
+			name:        "NoMergePullRequest",
+			testOptions: Options{NoMergePullRequest: true},
+			args: arguments{
+				ctx:             nil,
+				repo:            scm.Repository{FullName: "TestRepo"},
+				pr:              &scm.PullRequest{Head: scm.PullRequestBranch{Sha: "12345"}},
+				prInfo:          &scm.PullRequest{Number: 0},
+				logMergeFailure: false,
+			},
+			isTideRunning: false,
+			expectedLog:   "",
+		},
+		{
+			name:        "Merge Log",
+			testOptions: Options{},
+			args: arguments{
+				ctx:             nil,
+				repo:            scm.Repository{FullName: "TestRepo"},
+				pr:              &scm.PullRequest{Head: scm.PullRequestBranch{Sha: "12345"}},
+				prInfo:          &scm.PullRequest{Number: 0},
+				logMergeFailure: false,
+			},
+			isTideRunning: false,
+			expectedLog:   "WARNING: Failed to merge the Pull Request  due to pull request 0 not found maybe I don't have karma?\n",
+		},
+	}
+
+	for _, testCase := range testCases {
+		var tideLabel string
+		if testCase.isTideRunning {
+			tideLabel = "tide"
+		}
+
+		// Build new fake SCM client for test
+		scmFakeClient, scmFakeData := scmFake.NewDefault()
+		scmFakeData.PullRequests[1] = testCase.args.pr
+		testCase.testOptions.ScmClient = scmFakeClient
+		scmFakeData.Statuses["12345"] = []*scm.Status{
+			{
+				State: scm.StateSuccess,
+				Label: tideLabel,
+			},
+		}
+
+		t.Run(testCase.name, func(t *testing.T) {
+			// Set logger to output to buffer to check logs
+			var buf bytes.Buffer
+			log.SetOutput(&buf)
+			defer func() {
+				log.SetOutput(os.Stderr)
+			}()
+
+			testCase.testOptions.checkMergePullRequest(testCase.args.ctx, testCase.args.repo, testCase.args.pr, testCase.args.prInfo, testCase.args.logMergeFailure)
+			assert.Equal(t, testCase.expectedLog, buf.String())
+		})
+	}
+}
