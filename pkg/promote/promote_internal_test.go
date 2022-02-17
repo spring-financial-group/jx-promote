@@ -16,6 +16,7 @@ import (
 	kubeFake "k8s.io/client-go/kubernetes/fake"
 	"os"
 	"testing"
+	"time"
 )
 
 func TestOptions_validateClients(t *testing.T) {
@@ -488,6 +489,137 @@ func TestOptions_checkMergePullRequest(t *testing.T) {
 
 			testCase.testOptions.checkMergePullRequest(testCase.args.ctx, testCase.args.repo, testCase.args.pr, testCase.args.prInfo, testCase.args.logMergeFailure)
 			assert.Equal(t, testCase.expectedLog, buf.String())
+		})
+	}
+}
+
+func TestOptions_waitForGitOpsPullRequest(t *testing.T) {
+	type arguments struct {
+		ns          string
+		env         *jxcore.EnvironmentConfig
+		ReleaseInfo *ReleaseInfo
+		end         time.Time
+		duration    time.Duration
+		promoteKey  *activities.PromoteStepActivityKey
+	}
+
+	testCases := []struct {
+		name          string
+		testOptions   Options
+		args          arguments
+		expectedLog   string
+		expectedError string
+	}{
+		//{
+		//	name:        "No PullRequestInfo",
+		//	testOptions: Options{},
+		//	args: arguments{
+		//		ns:          "",
+		//		env:         nil,
+		//		ReleaseInfo: &ReleaseInfo{},
+		//		end:         time.Time{},
+		//		duration:    0,
+		//		promoteKey:  nil,
+		//	},
+		//	expectedLog:   "",
+		//	expectedError: "",
+		//},
+		//{
+		//	name:        "No Clients",
+		//	testOptions: Options{},
+		//	args: arguments{
+		//		ns:  "",
+		//		env: nil,
+		//		ReleaseInfo: &ReleaseInfo{
+		//			ReleaseName:     "",
+		//			FullAppName:     "",
+		//			Version:         "",
+		//			PullRequestInfo: &scm.PullRequest{},
+		//		},
+		//		end:        time.Time{},
+		//		duration:   0,
+		//		promoteKey: nil,
+		//	},
+		//	expectedLog:   "",
+		//	expectedError: "no jx client",
+		//},
+		//{
+		//	name: "Forced timeout",
+		//	testOptions: Options{
+		//		JXClient:   jxFake.NewSimpleClientset(),
+		//		KubeClient: kubeFake.NewSimpleClientset(),
+		//	},
+		//	args: arguments{
+		//		ReleaseInfo: &ReleaseInfo{
+		//			PullRequestInfo: &scm.PullRequest{},
+		//		},
+		//		end:      time.Now().Add(-5 * time.Second),
+		//		duration: -5 * time.Second,
+		//	},
+		//	expectedLog:   "",
+		//	expectedError: "timed out waiting for pull request  to merge. Waited -5s",
+		//},
+		//{
+		//	name: "PullRequest.Find error",
+		//	testOptions: Options{
+		//		JXClient:   jxFake.NewSimpleClientset(),
+		//		KubeClient: kubeFake.NewSimpleClientset(),
+		//	},
+		//	args: arguments{
+		//		ReleaseInfo: &ReleaseInfo{
+		//			PullRequestInfo: &scm.PullRequest{},
+		//		},
+		//		end:      time.Now().Add(10 * time.Minute),
+		//		duration: 10 * time.Minute,
+		//	},
+		//	expectedLog:   "",
+		//	expectedError: "failed to find PR  0: Pull request number 0 does not exit",
+		//},
+		{
+			name: "PullRequest.Find error",
+			testOptions: Options{
+				JXClient:   jxFake.NewSimpleClientset(),
+				KubeClient: kubeFake.NewSimpleClientset(),
+			},
+			args: arguments{
+				ReleaseInfo: &ReleaseInfo{
+					PullRequestInfo: &scm.PullRequest{},
+				},
+				end:      time.Now().Add(10 * time.Minute),
+				duration: 10 * time.Minute,
+			},
+			expectedLog:   "",
+			expectedError: "failed to find PR  0: Pull request number 0 does not exit",
+		},
+	}
+
+	for _, testCase := range testCases {
+		// Build new fake SCM client for test
+		scmFakeClient, _ := scmFake.NewDefault()
+		//scmFakeData.PullRequests[1] = testCase.args.pr
+		testCase.testOptions.ScmClient = scmFakeClient
+		//scmFakeData.Statuses["12345"] = []*scm.Status{
+		//	{
+		//		State: scm.StateSuccess,
+		//		Label: tideLabel,
+		//	},
+		//}
+
+		t.Run(testCase.name, func(t *testing.T) {
+			// Set logger to output to buffer to check logs
+			var buf bytes.Buffer
+			log.SetOutput(&buf)
+			defer func() {
+				log.SetOutput(os.Stderr)
+			}()
+
+			err := testCase.testOptions.waitForGitOpsPullRequest(testCase.args.ns, testCase.args.env, testCase.args.ReleaseInfo, testCase.args.end, testCase.args.duration, testCase.args.promoteKey)
+			assert.Equal(t, testCase.expectedLog, buf.String())
+			if testCase.expectedError == "" {
+				assert.NoError(t, err)
+				return
+			}
+			assert.Equal(t, testCase.expectedError, err.Error())
 		})
 	}
 }
